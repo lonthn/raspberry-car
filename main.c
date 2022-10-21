@@ -1,93 +1,102 @@
 #include "car.h"
 #include "iobyte.h"
 #include "server.h"
-#include "itime.h"
 
 #include <stdio.h>
 #include <memory.h>
 #include <signal.h>
 
-#define OPT_FORWARD   0x1
-#define OPT_BACKWARD  0x2
-#define OPT_STOP      0x3
+#define PKGID_FORWARD      0x01
+#define PKGID_BACKWARD     0x02
+#define PKGID_STOP         0x03
+#define PKGID_OPEN_CAMERA  0x04
+#define PKGID_CLOSE_CAMERA 0x05
 
-struct us_loop_t *loop_;
-struct us_socket_context_t *socket_context_;
-struct us_listen_socket_t *listen_socket_;
-struct us_timer_t *timer_;
+struct server_context *sctx_;
 
-void on_weakup(struct us_loop_t* loop) { }
-void on_pre(struct us_loop_t* loop) { }
-void on_post(struct us_loop_t* loop) { }
+int      poll_timeout_;
 
-void on_timer(struct us_timer_t* timer);
+///
+int      camera_flag_;
+int      fps_;
+uint64_t time_;
+uint64_t next_time_;
 
-void signal_handler(int sig) {
-    car_release();
-    us_listen_socket_close(SSL, listen_socket_);
-}
+void package_proc(struct package *pkg);
+void camera_proc();
+void signal_handler(int sig);
 
 int main() {
-    printf("============= RaspberryCar =============\n");
-
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
+    printf("============= Raspberry Car =============\n");
+
     car_init();
 
-    loop_ = us_create_loop(NULL,
-            on_weakup, on_pre, on_post, 0);
-
-//    timer_ = us_create_timer(loop_, 1, 0);
-//    us_timer_set(timer_, on_timer, 1000, 100);
-
-    socket_context_ = server_init(loop_);
-
-    /* Start accepting sockets */
-    listen_socket_ = server_listen(socket_context_, 9999);
-
-    if (listen_socket_) {
-        printf("Starting on port 9999...\n");
-        us_loop_run(loop_);
-    } else {
+    sctx_ = server_context_create(5760, package_proc);
+    if (sctx_ == NULL) {
         printf("Failed to start!\n");
+        goto over;
     }
 
-    us_loop_free(loop_);
-    printf("application exit!\n");
+    /* Start accepting sockets */
+    printf("Starting on port 9999...\n");
+
+    camera_flag_ = 0;
+    poll_timeout_ = 1000;
+    while (sctx_->active_) {
+        if (server_context_poll(sctx_, poll_timeout_) != 0)
+            break;
+
+        if (camera_flag_) {
+            camera_proc();
+        }
+    }
+
+    over:
+    car_release();
+    if (sctx_ != NULL) server_context_release(sctx_);
+
+    printf("Over\n");
     return 0;
 }
 
-void on_option(struct option_head* head, char* body) {
-    //printf("opt: %d\n", head->option_id_);
-    switch (head->option_id_) {
-        case OPT_FORWARD: {
-            struct ibstream *ibs = ibstream_from_buf(body, head->body_len_);
+void signal_handler(int sig) {
+    car_release();
+}
+
+void package_proc(struct package* pkg) {
+    struct ibstream *ibs = ibstream_from_buf(mini_package_body(pkg), pkg->body_len_);
+
+    switch (pkg->pkg_id_) {
+        case PKGID_FORWARD: {
             uint32_t ls = (uint32_t)ibstream_read_int16(ibs);
             uint32_t rs = (uint32_t)ibstream_read_int16(ibs);
             car_forward(ls, rs);
             break;
         }
-        case OPT_BACKWARD: {
-            struct ibstream *ibs = ibstream_from_buf(body, head->body_len_);
+        case PKGID_BACKWARD: {
             uint32_t ls = (uint32_t)ibstream_read_int16(ibs);
             uint32_t rs = (uint32_t)ibstream_read_int16(ibs);
             car_backward(ls, rs);
             break;
         }
-        case OPT_STOP: {
+        case PKGID_STOP: {
             car_stop();
             break;
         }
+        case PKGID_OPEN_CAMERA: {
+            // TODO:
+            camera_flag_ = 1;
+            break;
+        }
+        case PKGID_CLOSE_CAMERA: {
+            // TODO:
+            camera_flag_ = 0;
+            break;
+        }
     }
-}
 
-//void on_timer(struct us_timer_t *timer) {
-//    if (!capture_)
-//        return;
-//
-//    IplImage* frame = cvQueryFrame(capture_);
-//    if (frame) {
-//        printf("w:%d, h:%d, size: %d\n", frame->width, frame->height, frame->width*frame->height);
-//    }
-//}
+    ibstream_release(ibs);
+}

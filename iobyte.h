@@ -19,6 +19,7 @@ struct ibstream {
 
 /// Create a byte input stream, the buf is data source
 struct ibstream* ibstream_from_buf(const char* buf, uint32_t len);
+void             ibstream_release(struct ibstream *ibs);
 
 /// Read data of basic type from the input stream.
 int32_t          ibstream_read(struct ibstream* ibs, char* buf, uint32_t len);

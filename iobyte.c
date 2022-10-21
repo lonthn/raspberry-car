@@ -5,7 +5,6 @@
 #include <malloc.h>
 #include <assert.h>
 
-
 struct ibstream* ibstream_from_buf(const char* buf, uint32_t len) {
     struct ibstream *ibs =
             (struct ibstream *) malloc(sizeof(struct ibstream));
@@ -13,6 +12,10 @@ struct ibstream* ibstream_from_buf(const char* buf, uint32_t len) {
     ibs->len_ = len;
     ibs->pos_ = 0;
     return ibs;
+}
+
+void ibstream_release(struct ibstream *ibs) {
+    free(ibs);
 }
 
 int32_t ibstream_read(struct ibstream* ibs, char* buf, uint32_t len) {
