@@ -69,7 +69,7 @@ int server_context_send(struct server_context *ctx, struct package *pkg) {
 
     char *buf = (char *) pkg;
     int len = package_len(pkg);
-    if (ctx->send_len_ == 0) {
+    if (ctx->sendlen_ == 0) {
         int nwrite = send(ctx->accepted_fd_, buf, len, 0);
         if (nwrite < 0) return -1;
         if (nwrite == len) return len;
@@ -78,15 +78,15 @@ int server_context_send(struct server_context *ctx, struct package *pkg) {
         len -= nwrite;
     }
 
-    if ((ctx->sendbuf_capacity_ - ctx->send_len_) < len) {
+    if ((ctx->sendbuf_capacity_ - ctx->sendlen_) < len) {
         ctx->sendbuf_ = realloc(ctx->sendbuf_,
                                 ctx->sendbuf_capacity_ + len);
         assert(ctx->sendbuf_);
         ctx->sendbuf_capacity_ += len;
     }
 
-    memcpy(ctx->sendbuf_ + ctx->send_len_, buf, len);
-    ctx->send_len_ += len;
+    memcpy(ctx->sendbuf_ + ctx->sendlen_, buf, len);
+    ctx->sendlen_ += len;
     return 0;
 }
 
@@ -94,12 +94,14 @@ int __sctx_on_read(struct server_context *ctx) {
     int nread;
     struct package *pkg;
     int pkg_len;
+
     char *buf;
+    int   len;
 
     read:
     buf = ctx->recvbuf_;
-    nread = recv(ctx->accepted_fd_, buf + ctx->recv_len_,
-                 SCTX_RECVBUF_CAPACITY - ctx->recv_len_, 0);
+    nread = recv(ctx->accepted_fd_, buf + ctx->recvlen_,
+                 SCTX_RECVBUF_CAPACITY - ctx->recvlen_, 0);
     if (nread < 0) {
         if (nread == EAGAIN) {
             return 0;
@@ -110,14 +112,19 @@ int __sctx_on_read(struct server_context *ctx) {
     if (nread == 0) {
         close(ctx->accepted_fd_);
         ctx->accepted_fd_ = 0;
-        printf("ServerContext: connection(%s) is close\n.", "");
-        return -1;
+        printf("ServerContext: connection(%s) is close.\n", "");
+        return 0;
     }
 
+    len = (int) (ctx->recvlen_ + nread);
     while (1) {
-        if (nread < MINI_PACKAGE_HEAD_LEN) {
-            memcpy(ctx->recvbuf_, buf, nread);
-            ctx->recv_len_ += nread;
+        if (len < MINI_PACKAGE_HEAD_LEN) {
+            if (len != 0) {
+                memcpy(ctx->recvbuf_, buf, len);
+                ctx->recvlen_ = len;
+                return 0;
+            }
+            ctx->recvlen_ = 0;
             return 0;
         }
 
@@ -125,22 +132,20 @@ int __sctx_on_read(struct server_context *ctx) {
         if (pkg->body_len_ > SCTX_MAX_PKG_BODY_LEN) {
             close(ctx->accepted_fd_);
             ctx->accepted_fd_ = 0;
-            printf("ServerContext: connection(%s) is close\n.", "");
-            return -1;
+            printf("ServerContext: connection(%s) is close.\n", "");
+            return 0;
         }
         pkg_len = mini_package_len(pkg);
-        if (pkg_len > nread) {
-            memcpy(ctx->recvbuf_, buf, nread);
-            ctx->recv_len_ += nread;
+        if (pkg_len > len) {
+            memcpy(ctx->recvbuf_, buf, len);
+            ctx->recvlen_ = len;
             goto read;
         }
 
         ctx->package_cb_(pkg);
         buf += pkg_len;
-        nread -= pkg_len;
+        len -= pkg_len;
     }
-
-    return 0;
 }
 
 int __sctx_on_write(struct server_context *ctx) {
@@ -148,18 +153,18 @@ int __sctx_on_write(struct server_context *ctx) {
     int remain;
 
     nw = 0;
-    if (ctx->send_len_ != 0) {
-        nw = send(ctx->accepted_fd_, ctx->sendbuf_, ctx->send_len_, 0);
+    if (ctx->sendlen_ != 0) {
+        nw = send(ctx->accepted_fd_, ctx->sendbuf_, ctx->sendlen_, 0);
         if (nw <= 0) return -1;
-        if (nw == ctx->send_len_) {
-            ctx->send_len_ = 0;
+        if (nw == ctx->sendlen_) {
+            ctx->sendlen_ = 0;
             return nw;
         }
     }
 
-    remain = ctx->send_len_ - nw;
-    memcpy(ctx->sendbuf_ + ctx->send_len_, ctx->sendbuf_ + nw, remain);
-    ctx->send_len_ = remain;
+    remain = (int) (ctx->sendlen_ - nw);
+    memcpy(ctx->sendbuf_ + ctx->sendlen_, ctx->sendbuf_ + nw, remain);
+    ctx->sendlen_ = remain;
     return 0;
 }
 
@@ -177,7 +182,9 @@ int server_context_poll(struct server_context *ctx, int timeout) {
 
     if (ctx->accepted_fd_ != 0) {
         FD_SET(ctx->accepted_fd_, &rfs);
-        FD_SET(ctx->accepted_fd_, &wfs);
+        if (ctx->sendlen_ != 0) {
+            FD_SET(ctx->accepted_fd_, &wfs);
+        }
         nfds = ctx->accepted_fd_;
     } else {
         FD_SET(ctx->listen_fd_, &rfs);
@@ -201,7 +208,7 @@ int server_context_poll(struct server_context *ctx, int timeout) {
         }
         ctx->accepted_fd_ = res;
         printf("ServerContext: accepted new connection: %s.\n", "");
-        return 1;
+        return 0;
     }
 
     if (FD_ISSET(ctx->accepted_fd_, &rfs)) {

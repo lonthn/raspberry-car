@@ -15,9 +15,9 @@ struct server_context {
 
     char    *sendbuf_;
     uint32_t sendbuf_capacity_;
-    uint32_t send_len_;
+    uint32_t sendlen_;
     char    *recvbuf_;
-    uint32_t recv_len_;
+    uint32_t recvlen_;
 
     package_cb package_cb_;
 };

@@ -4,7 +4,7 @@
 
 #include "car.h"
 
-#include <bcm2835.h>
+#include "bcm2835/bcm2835.h"
 #include <stdio.h>
 
 #define LPIN0 RPI_GPIO_P1_15
@@ -29,7 +29,7 @@ int car_init() {
     bcm2835_gpio_fsel(REN,   BCM2835_GPIO_FSEL_ALT5);
 
     // initial pwm params
-    bcm2835_pwm_set_clock(BCM2835_PWM_CLOCK_DIVIDER_1024);
+    bcm2835_pwm_set_clock(BCM2835_PWM_CLOCK_DIVIDER_512);
     bcm2835_pwm_set_mode(0, 1, 1);
     bcm2835_pwm_set_mode(1, 1, 1);
     bcm2835_pwm_set_range(0, 1024);
@@ -46,7 +46,8 @@ void car_forward(uint32_t ls, uint32_t rs) {
     bcm2835_gpio_write(LPIN1, LOW);
     bcm2835_gpio_write(RPIN0, LOW);
     bcm2835_gpio_write(RPIN1, HIGH);
-    car_update_speed(ls, rs);
+    bcm2835_pwm_set_data(0, ls);
+    bcm2835_pwm_set_data(1, rs);
 }
 
 void car_backward(uint32_t ls, uint32_t rs) {
@@ -54,7 +55,8 @@ void car_backward(uint32_t ls, uint32_t rs) {
     bcm2835_gpio_write(LPIN1, HIGH);
     bcm2835_gpio_write(RPIN0, HIGH);
     bcm2835_gpio_write(RPIN1, LOW);
-    car_update_speed(ls, rs);
+    bcm2835_pwm_set_data(0, ls);
+    bcm2835_pwm_set_data(1, rs);
 }
 
 void car_update_speed(uint32_t ls, uint32_t rs) {

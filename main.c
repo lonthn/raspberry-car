@@ -41,14 +41,13 @@ int main() {
     }
 
     /* Start accepting sockets */
-    printf("Starting on port 9999...\n");
+    printf("Starting on port 5760...\n");
 
     camera_flag_ = 0;
     poll_timeout_ = 1000;
     while (sctx_->active_) {
         if (server_context_poll(sctx_, poll_timeout_) != 0)
             break;
-
         if (camera_flag_) {
             camera_proc();
         }
@@ -63,12 +62,12 @@ int main() {
 }
 
 void signal_handler(int sig) {
+    sctx_->active_ = 0;
     car_release();
 }
 
 void package_proc(struct package* pkg) {
     struct ibstream *ibs = ibstream_from_buf(mini_package_body(pkg), pkg->body_len_);
-
     switch (pkg->pkg_id_) {
         case PKGID_FORWARD: {
             uint32_t ls = (uint32_t)ibstream_read_int16(ibs);
@@ -99,4 +98,8 @@ void package_proc(struct package* pkg) {
     }
 
     ibstream_release(ibs);
+}
+
+void camera_proc() {
+
 }
