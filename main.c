@@ -37,12 +37,12 @@ int main() {
     sctx_ = server_context_create(5760, package_proc);
     if (sctx_ == NULL) {
         printf("Failed to start!\n");
-        goto over;
+        goto exit;
     }
 
-    /* Start accepting sockets */
     printf("Starting on port 5760...\n");
 
+    // Main loop
     camera_flag_ = 0;
     poll_timeout_ = 1000;
     while (sctx_->active_) {
@@ -53,11 +53,13 @@ int main() {
         }
     }
 
-    over:
+    exit:
     car_release();
-    if (sctx_ != NULL) server_context_release(sctx_);
+    if (sctx_ != NULL) {
+        server_context_release(sctx_);
+    }
 
-    printf("Over\n");
+    printf("Exit app!\n");
     return 0;
 }
 

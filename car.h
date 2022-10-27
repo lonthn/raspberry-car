@@ -7,14 +7,11 @@
 
 #include <stdint.h>
 
-struct car {};
-
 int  car_init();
 void car_release();
 
 void car_forward(uint32_t ls, uint32_t rs);
 void car_backward(uint32_t ls, uint32_t rs);
-void car_update_speed(uint32_t ls, uint32_t rs);
 void car_stop();
 
 //void car_open_light();

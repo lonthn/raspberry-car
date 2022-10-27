@@ -11,8 +11,8 @@ include_directories(./)
 
 add_executable(${target}
         bcm2835/bcm2835.c
-
-        car.c
         iobyte.c
+        camera.c
+        car.c
         server.c
         main.c)
