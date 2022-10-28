@@ -4,6 +4,7 @@
 //
 
 #include "camera.h"
+#include "select.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,8 +32,16 @@ static int             mbuf_count_;
 static uint32_t fwidth_;
 static uint32_t fheight_;
 
+int camera__read(void *ctx, int fd) {
+    struct server_context *sctx = (struct server_context *) ctx;
+    if (!sctx->active_)
+        return 1;
 
-int camera_open(uint32_t width, uint32_t height) {
+    // TODO: Read frame and upload to server
+    return 0;
+}
+
+int camera_open(struct server_context *sctx, uint32_t width, uint32_t height) {
     struct v4l2_capability cap;
     struct v4l2_format     fmt;
     unsigned int           min;
@@ -134,6 +143,8 @@ int camera_open(uint32_t width, uint32_t height) {
 
     fwidth_= width;
     fheight_ = height;
+
+    selecter_add(fd_, SEL_READABLE, camera__read, sctx);
     return 0;
 }
 
@@ -173,39 +184,25 @@ static void camera__parse_im(const unsigned char *im_yuv, unsigned char *dst,
     }
 }
 
-int camera_frame(char* frame) {
-    struct timeval tv;
-    fd_set rfs;
+int camera_frame(uint8_t* frame) {
     struct v4l2_buffer buf;
-
-    FD_ZERO(&rfs);
-    FD_SET(fd_, &rfs);
-    tv.tv_sec = 0;
-    tv.tv_usec = 0;
-    if (select(fd_ + 1, &rfs, NULL, NULL, &tv) == 0) {
-        return 0;
-    }
-
-    if(FD_ISSET(fd_, &rfs)) {
-        memset(&buf, 0, sizeof(struct v4l2_buffer));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        /* dequeue from buffer */
-        if(ioctl(fd_, VIDIOC_DQBUF, &buf) == -1) {
-            if (errno == EAGAIN) {
-                return 0;
-            }
-            printf("Camera get frame error: %d\n", errno);
-            return -1;
+    memset(&buf, 0, sizeof(struct v4l2_buffer));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    /* dequeue from buffer */
+    if(ioctl(fd_, VIDIOC_DQBUF, &buf) == -1) {
+        if (errno == EAGAIN) {
+            return 0;
         }
-
-        unsigned char* im_from_cam = (unsigned char*)mbufs_[buf.index].mem;
-
-        camera__parse_im(im_from_cam, frame, fwidth_, fheight_);
-
-        /* queue-in buffer */
-        assert(ioctl(fd_, VIDIOC_QBUF, &buf) == 0);
+        printf("Camera get frame error: %d\n", errno);
+        return -1;
     }
+
+    unsigned char* im_from_cam = (unsigned char*)mbufs_[buf.index].mem;
+    camera__parse_im(im_from_cam, frame, fwidth_, fheight_);
+
+    /* queue-in buffer */
+    assert(ioctl(fd_, VIDIOC_QBUF, &buf) == 0);
 
     return 0;
 }

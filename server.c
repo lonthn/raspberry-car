@@ -3,10 +3,10 @@
 //
 
 #include "server.h"
+#include "select.h"
 
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/select.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdio.h>
@@ -20,6 +20,109 @@
 #define SCTX_RECVBUF_CAPACITY 1024
 
 #define SCTX_MAX_PKG_BODY_LEN 127
+
+int sctx__on_read(void *ctx, int fd, int sel_fn) {
+    int nread;
+    struct package *pkg;
+    int pkg_len;
+
+    char *buf;
+    int   len;
+    struct server_context *sctx = (struct server_context *) ctx;
+
+    read:
+    buf = sctx->recvbuf_;
+    nread = recv(sctx->accepted_fd_, buf + sctx->recvlen_,
+                 SCTX_RECVBUF_CAPACITY - sctx->recvlen_, 0);
+    if (nread < 0) {
+        if (nread == EAGAIN) {
+            return 0;
+        }
+        printf("ServerContext: recv error: %d\n", errno);
+        return 0;
+    }
+    if (nread == 0) {
+        goto close;
+    }
+
+    len = (int) (sctx->recvlen_ + nread);
+    while (1) {
+        if (len < MINI_PACKAGE_HEAD_LEN) {
+            if (len != 0) {
+                memcpy(sctx->recvbuf_, buf, len);
+                sctx->recvlen_ = len;
+                return 0;
+            }
+            sctx->recvlen_ = 0;
+            return 0;
+        }
+
+        pkg = (struct package *) buf;
+        if (pkg->body_len_ > SCTX_MAX_PKG_BODY_LEN) {
+            goto close;
+        }
+        pkg_len = mini_package_len(pkg);
+        if (pkg_len > len) {
+            memcpy(sctx->recvbuf_, buf, len);
+            sctx->recvlen_ = len;
+            goto read;
+        }
+
+        sctx->package_cb_(pkg);
+        buf += pkg_len;
+        len -= pkg_len;
+    }
+
+    close:
+    close(sctx->accepted_fd_);
+    sctx->accepted_fd_ = 0;
+    printf("ServerContext: connection(%s) is close.\n", "");
+    return 1; // remove sel_readable
+}
+
+int sctx__on_write(void *ctx, int fd, int sel_fn) {
+    int nw;
+    int remain;
+    struct server_context *sctx = (struct server_context *) ctx;
+
+    nw = 0;
+    if (sctx->sendlen_ != 0) {
+        nw = send(sctx->accepted_fd_, sctx->sendbuf_, sctx->sendlen_, 0);
+        if (nw <= 0) {
+            printf("SocketContext: write error: %d\n", errno);
+            return 0;
+        }
+        if (nw == sctx->sendlen_) {
+            sctx->sendlen_ = 0;
+            return 1;
+        }
+    }
+
+    remain = (int) (sctx->sendlen_ - nw);
+    memcpy(sctx->sendbuf_ + sctx->sendlen_, sctx->sendbuf_ + nw, remain);
+    sctx->sendlen_ = remain;
+    return 0;
+}
+
+int sctx__on_accpect(void *ctx, int fd, int sel_fn) {
+    int res;
+    struct sockaddr_in cli_addr;
+    socklen_t          addr_len;
+    struct server_context *sctx = (struct server_context *) ctx;
+
+    if (sctx->accepted_fd_ == 0) {
+        res = accept(sctx->listen_fd_, (struct sockaddr *) &cli_addr, &addr_len);
+        if (res <= 0) {
+            printf("ServerContext: accept error: %d.\n", errno);
+            return 0;
+        }
+        sctx->accepted_fd_ = res;
+
+        selecter_add(sctx->accepted_fd_, SEL_READABLE, sctx__on_read, ctx);
+        printf("ServerContext: accepted new connection: %s.\n", "");
+    }
+    return 1;
+}
 
 struct server_context *server_context_create(int port, package_cb pkg_cb) {
     int res;
@@ -59,7 +162,7 @@ struct server_context *server_context_create(int port, package_cb pkg_cb) {
     assert(ctx->recvbuf_);
 
     ctx->active_ = 1;
-
+    selecter_add(ctx->listen_fd_, SEL_READABLE, sctx__on_accpect, ctx);
     return ctx;
 }
 
@@ -87,138 +190,7 @@ int server_context_send(struct server_context *ctx, struct package *pkg) {
 
     memcpy(ctx->sendbuf_ + ctx->sendlen_, buf, len);
     ctx->sendlen_ += len;
-    return 0;
-}
-
-int __sctx_on_read(struct server_context *ctx) {
-    int nread;
-    struct package *pkg;
-    int pkg_len;
-
-    char *buf;
-    int   len;
-
-    read:
-    buf = ctx->recvbuf_;
-    nread = recv(ctx->accepted_fd_, buf + ctx->recvlen_,
-                 SCTX_RECVBUF_CAPACITY - ctx->recvlen_, 0);
-    if (nread < 0) {
-        if (nread == EAGAIN) {
-            return 0;
-        }
-        printf("ServerContext: recv error: %d\n", errno);
-        return nread;
-    }
-    if (nread == 0) {
-        close(ctx->accepted_fd_);
-        ctx->accepted_fd_ = 0;
-        printf("ServerContext: connection(%s) is close.\n", "");
-        return 0;
-    }
-
-    len = (int) (ctx->recvlen_ + nread);
-    while (1) {
-        if (len < MINI_PACKAGE_HEAD_LEN) {
-            if (len != 0) {
-                memcpy(ctx->recvbuf_, buf, len);
-                ctx->recvlen_ = len;
-                return 0;
-            }
-            ctx->recvlen_ = 0;
-            return 0;
-        }
-
-        pkg = (struct package *) buf;
-        if (pkg->body_len_ > SCTX_MAX_PKG_BODY_LEN) {
-            close(ctx->accepted_fd_);
-            ctx->accepted_fd_ = 0;
-            printf("ServerContext: connection(%s) is close.\n", "");
-            return 0;
-        }
-        pkg_len = mini_package_len(pkg);
-        if (pkg_len > len) {
-            memcpy(ctx->recvbuf_, buf, len);
-            ctx->recvlen_ = len;
-            goto read;
-        }
-
-        ctx->package_cb_(pkg);
-        buf += pkg_len;
-        len -= pkg_len;
-    }
-}
-
-int __sctx_on_write(struct server_context *ctx) {
-    int nw;
-    int remain;
-
-    nw = 0;
-    if (ctx->sendlen_ != 0) {
-        nw = send(ctx->accepted_fd_, ctx->sendbuf_, ctx->sendlen_, 0);
-        if (nw <= 0) return -1;
-        if (nw == ctx->sendlen_) {
-            ctx->sendlen_ = 0;
-            return nw;
-        }
-    }
-
-    remain = (int) (ctx->sendlen_ - nw);
-    memcpy(ctx->sendbuf_ + ctx->sendlen_, ctx->sendbuf_ + nw, remain);
-    ctx->sendlen_ = remain;
-    return 0;
-}
-
-int server_context_poll(struct server_context *ctx, int timeout) {
-    struct timeval tv;
-    fd_set rfs, wfs;
-    int nfds;
-    int res;
-    struct sockaddr_in cli_addr;
-    socklen_t addr_len;
-
-    if (ctx->active_ == 0) {
-        return -1;
-    }
-
-    if (ctx->accepted_fd_ != 0) {
-        FD_SET(ctx->accepted_fd_, &rfs);
-        if (ctx->sendlen_ != 0) {
-            FD_SET(ctx->accepted_fd_, &wfs);
-        }
-        nfds = ctx->accepted_fd_;
-    } else {
-        FD_SET(ctx->listen_fd_, &rfs);
-        nfds = ctx->listen_fd_;
-    }
-    tv.tv_sec = timeout / 1000;
-    tv.tv_usec = (timeout % 1000) * 1000;
-    res = select(nfds+1, &rfs, &wfs, NULL, timeout < 0 ? NULL : &tv);
-    if (res < 0) {
-        printf("ServerContext: select error: %d.\n", errno);
-        return res;
-    }
-    if (res == 0)
-        return 0;
-
-    if (ctx->accepted_fd_ == 0) {
-        res = accept(ctx->listen_fd_, (struct sockaddr *) &cli_addr, &addr_len);
-        if (res <= 0) {
-            printf("ServerContext: accept error: %d.\n", errno);
-            return res;
-        }
-        ctx->accepted_fd_ = res;
-        printf("ServerContext: accepted new connection: %s.\n", "");
-        return 0;
-    }
-
-    if (FD_ISSET(ctx->accepted_fd_, &rfs)) {
-        return __sctx_on_read(ctx);
-    }
-
-    if (FD_ISSET(ctx->accepted_fd_, &wfs)) {
-        return __sctx_on_write(ctx);
-    }
-
+    selecter_add(ctx->accepted_fd_, SEL_WRITEABLE, sctx__on_write, ctx);
     return 0;
 }
 

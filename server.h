@@ -24,7 +24,6 @@ struct server_context {
 
 struct server_context *server_context_create(int port, package_cb pkg_cb);
 int server_context_send(struct server_context *ctx, struct package *pkg);
-int server_context_poll(struct server_context *ctx, int timeout);
 void server_context_release(struct server_context *ctx);
 
 #endif //RASPBERRY_CAR_TERMINAL_SERVER_H

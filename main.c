@@ -1,6 +1,8 @@
 #include "car.h"
+#include "camera.h"
 #include "iobyte.h"
 #include "server.h"
+#include "select.h"
 
 #include <stdio.h>
 #include <memory.h>
@@ -46,14 +48,12 @@ int main() {
     camera_flag_ = 0;
     poll_timeout_ = 1000;
     while (sctx_->active_) {
-        if (server_context_poll(sctx_, poll_timeout_) != 0)
+        if (selecter_poll(poll_timeout_) != 0)
             break;
-        if (camera_flag_) {
-            camera_proc();
-        }
     }
 
     exit:
+    camera_close();
     car_release();
     if (sctx_ != NULL) {
         server_context_release(sctx_);

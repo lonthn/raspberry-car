@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13.4)
+cmake_minimum_required(VERSION 3.12.1)
 
 set(target raspberry-car)
 
@@ -12,6 +12,7 @@ include_directories(./)
 add_executable(${target}
         bcm2835/bcm2835.c
         iobyte.c
+        select.c
         camera.c
         car.c
         server.c
