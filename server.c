@@ -21,7 +21,7 @@
 
 #define SCTX_MAX_PKG_BODY_LEN 127
 
-int sctx__on_read(void *ctx, int fd, int sel_fn) {
+int sctx__on_read(void *ctx, int fd) {
     int nread;
     struct package *pkg;
     int pkg_len;
@@ -80,7 +80,7 @@ int sctx__on_read(void *ctx, int fd, int sel_fn) {
     return 1; // remove sel_readable
 }
 
-int sctx__on_write(void *ctx, int fd, int sel_fn) {
+int sctx__on_write(void *ctx, int fd) {
     int nw;
     int remain;
     struct server_context *sctx = (struct server_context *) ctx;
@@ -104,7 +104,7 @@ int sctx__on_write(void *ctx, int fd, int sel_fn) {
     return 0;
 }
 
-int sctx__on_accpect(void *ctx, int fd, int sel_fn) {
+int sctx__on_accpect(void *ctx, int fd) {
     int res;
     struct sockaddr_in cli_addr;
     socklen_t          addr_len;
