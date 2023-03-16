@@ -11,7 +11,7 @@
 typedef int (*trigger_cb_t)(void *ctx, int fd);
 
 void selecter_add(int fd, int fn, trigger_cb_t cb, void *ctx);
-void selecter_set(int fd, int fn, trigger_cb_t cb, void *ctx);
+//void selecter_set(int fd, int fn, trigger_cb_t cb, void *ctx);
 void selecter_remove(int fd, int fn);
 int  selecter_poll(int timeout);
 

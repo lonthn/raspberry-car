@@ -15,11 +15,14 @@
 #include <assert.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 
-#define SCTX_SENDBUF_CAPACITY 1024*1024
+#define SCTX_SENDBUF_CAPACITY (1024*1024)
 #define SCTX_RECVBUF_CAPACITY 1024
 
 #define SCTX_MAX_PKG_BODY_LEN 127
+
+int sctx__on_accpect(void *ctx, int fd);
 
 int sctx__on_read(void *ctx, int fd) {
     int nread;
@@ -35,9 +38,12 @@ int sctx__on_read(void *ctx, int fd) {
     nread = recv(sctx->accepted_fd_, buf + sctx->recvlen_,
                  SCTX_RECVBUF_CAPACITY - sctx->recvlen_, 0);
     if (nread < 0) {
-        if (nread == EAGAIN) {
+        if (errno == EAGAIN)
             return 0;
-        }
+
+        if (errno == 104)
+            goto close;
+
         printf("ServerContext: recv error: %d\n", errno);
         return 0;
     }
@@ -47,7 +53,7 @@ int sctx__on_read(void *ctx, int fd) {
 
     len = (int) (sctx->recvlen_ + nread);
     while (1) {
-        if (len < MINI_PACKAGE_HEAD_LEN) {
+        if (len < PACKAGE_HEAD_LEN) {
             if (len != 0) {
                 memcpy(sctx->recvbuf_, buf, len);
                 sctx->recvlen_ = len;
@@ -61,7 +67,7 @@ int sctx__on_read(void *ctx, int fd) {
         if (pkg->body_len_ > SCTX_MAX_PKG_BODY_LEN) {
             goto close;
         }
-        pkg_len = mini_package_len(pkg);
+        pkg_len = package_len(pkg);
         if (pkg_len > len) {
             memcpy(sctx->recvbuf_, buf, len);
             sctx->recvlen_ = len;
@@ -76,7 +82,9 @@ int sctx__on_read(void *ctx, int fd) {
     close:
     close(sctx->accepted_fd_);
     sctx->accepted_fd_ = 0;
-    printf("ServerContext: connection(%s) is close.\n", "");
+    printf("ServerContext recv: connection(%s) is close.\n", "");
+
+    selecter_add(sctx->listen_fd_, SEL_READABLE, sctx__on_accpect, ctx);
     return 1; // remove sel_readable
 }
 
@@ -117,9 +125,10 @@ int sctx__on_accpect(void *ctx, int fd) {
             return 0;
         }
         sctx->accepted_fd_ = res;
+        fcntl(sctx->accepted_fd_, F_SETFL, O_NONBLOCK);
 
         selecter_add(sctx->accepted_fd_, SEL_READABLE, sctx__on_read, ctx);
-        printf("ServerContext: accepted new connection: %s.\n", "");
+        printf("ServerContext: accepted new connection\n");
     }
     return 1;
 }
@@ -132,7 +141,7 @@ struct server_context *server_context_create(int port, package_cb pkg_cb) {
 
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd <= 0) {
-        printf("ServerContext: create socket error: %d.\n", errno);
+        printf("ServerContext: create socket error(%d).\n", errno);
         return NULL;
     }
 
@@ -141,12 +150,12 @@ struct server_context *server_context_create(int port, package_cb pkg_cb) {
     addr.sin_port = htons(port);
     res = bind(listen_fd, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
     if (res != 0) {
-        printf("ServerContext: bind error: %d.\n", errno);
+        printf("ServerContext: bind error(%d).\n", errno);
         return NULL;
     }
     res = listen(listen_fd, 1);
     if (res != 0) {
-        printf("ServerContext: listen error: %d.\n", errno);
+        printf("ServerContext: listen error(%d).\n", errno);
         return NULL;
     }
 
@@ -161,6 +170,8 @@ struct server_context *server_context_create(int port, package_cb pkg_cb) {
     assert(ctx->sendbuf_);
     assert(ctx->recvbuf_);
 
+    fcntl(ctx->listen_fd_, F_SETFL, O_NONBLOCK);
+
     ctx->active_ = 1;
     selecter_add(ctx->listen_fd_, SEL_READABLE, sctx__on_accpect, ctx);
     return ctx;
@@ -174,7 +185,18 @@ int server_context_send(struct server_context *ctx, struct package *pkg) {
     int len = package_len(pkg);
     if (ctx->sendlen_ == 0) {
         int nwrite = send(ctx->accepted_fd_, buf, len, 0);
-        if (nwrite < 0) return -1;
+        if (nwrite < 0) {
+            printf("write err: %d\n", errno);
+            if (errno != EAGAIN) {
+                close(ctx->accepted_fd_);
+                selecter_remove(ctx->accepted_fd_, SEL_READABLE);
+                ctx->accepted_fd_ = 0;
+                selecter_add(ctx->listen_fd_, SEL_READABLE, sctx__on_accpect, ctx);
+                printf("ServerContext send: connection is close.\n");
+                return 0;
+            }
+            nwrite = 0;
+        }
         if (nwrite == len) return len;
 
         buf += nwrite;
@@ -191,6 +213,7 @@ int server_context_send(struct server_context *ctx, struct package *pkg) {
     memcpy(ctx->sendbuf_ + ctx->sendlen_, buf, len);
     ctx->sendlen_ += len;
     selecter_add(ctx->accepted_fd_, SEL_WRITEABLE, sctx__on_write, ctx);
+    printf("pressure:%d\n", ctx->sendlen_);
     return 0;
 }
 

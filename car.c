@@ -39,7 +39,7 @@ int car_init() {
     bcm2835_gpio_fsel(REN,   BCM2835_GPIO_FSEL_ALT5);
 
     // initial pwm params
-    bcm2835_pwm_set_clock(BCM2835_PWM_CLOCK_DIVIDER_512);
+    bcm2835_pwm_set_clock(BCM2835_PWM_CLOCK_DIVIDER_1024);
     bcm2835_pwm_set_mode(0, 1, 1);
     bcm2835_pwm_set_mode(1, 1, 1);
     bcm2835_pwm_set_range(0, 1024);
